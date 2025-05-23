@@ -1,50 +1,24 @@
 import { forwardRef, useImperativeHandle, useState, useEffect } from "react";
 import axios from "axios";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 
 const BASE_URL = "http://45.64.100.26:88/perpus-api/public/api";
 
 const Dashboard = forwardRef((props, ref) => {
   const [stats, setStats] = useState({
-    totalMembers: 120,
-    totalBooks: 450,
-    totalLendings: 320,
+    totalMembers: 0,
+    totalBooks: 0,
+    totalLendings: 0,
   });
-  const [borrowingsData, setBorrowingsData] = useState([
-    { month: 'Jan', borrowings: 20 },
-    { month: 'Feb', borrowings: 35 },
-    { month: 'Mar', borrowings: 50 },
-    { month: 'Apr', borrowings: 40 },
-    { month: 'Mei', borrowings: 60 },
-    { month: 'Jun', borrowings: 30 },
-  ]);
-  const [recentBorrowings, setRecentBorrowings] = useState([
-    {
-      id: 1,
-      member: { nama: 'John Doe' },
-      book: { judul: 'React for Beginners' },
-      tanggal_peminjaman: '2025-05-20',
-    },
-    {
-      id: 2,
-      member: { nama: 'Jane Smith' },
-      book: { judul: 'Advanced JavaScript' },
-      tanggal_peminjaman: '2025-05-18',
-    },
-  ]);
-  const [popularBooks, setPopularBooks] = useState([
-    { judul: 'React for Beginners', pengarang: 'John Doe', borrowCount: 15 },
-    { judul: 'Advanced JavaScript', pengarang: 'Jane Smith', borrowCount: 12 },
-    { judul: 'CSS Mastery', pengarang: 'Chris Coyier', borrowCount: 10 },
-  ]);
+  const [borrowingsData, setBorrowingsData] = useState([]);
+  const [recentBorrowings, setRecentBorrowings] = useState([]);
+  const [popularBooks, setPopularBooks] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [recentBorrowingsPage, setRecentBorrowingsPage] = useState(1);
-  const [popularBooksPage, setPopularBooksPage] = useState(1);
-  const itemsPerPage = 5;
   const navigate = useNavigate();
+  const location = useLocation(); // Untuk mendeteksi perubahan lokasi
 
-  // Fungsi untuk mendapatkan headers dengan token terbaru
+  // Fungsi untuk mendapatkan headers dengan token
   const getHeaders = () => {
     const token = localStorage.getItem("token");
     if (!token) {
@@ -66,6 +40,7 @@ const Dashboard = forwardRef((props, ref) => {
 
   // Format tanggal Indonesia
   const formatDate = (dateString) => {
+    if (!dateString) return "-";
     const options = { 
       weekday: 'long', 
       year: 'numeric', 
@@ -77,6 +52,7 @@ const Dashboard = forwardRef((props, ref) => {
 
   // Format waktu relatif
   const timeAgo = (dateString) => {
+    if (!dateString) return "-";
     const date = new Date(dateString);
     const now = new Date();
     const seconds = Math.floor((now - date) / 1000);
@@ -99,47 +75,57 @@ const Dashboard = forwardRef((props, ref) => {
     return "Baru saja";
   };
 
-  // Fungsi untuk fetch data dengan retry dan penanganan error
-  const fetchWithAuth = async (url, options = {}, retries = 3) => {
+  // Fungsi untuk fetch data dengan penanganan error
+  const fetchWithAuth = async (url) => {
     try {
       const response = await axios.get(url, {
-        ...options,
-        headers: getHeaders()
+        headers: getHeaders(),
       });
-      return response;
+      return response.data;
     } catch (error) {
       if (error.response && error.response.status === 401) {
         handleLogout();
-        throw error;
       }
-      
-      if (retries > 0) {
-        console.warn(`Retrying... (${3 - retries + 1})`);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        return fetchWithAuth(url, options, retries - 1);
-      }
-      
+      console.error("Error fetching data:", error);
       throw error;
+    }
+  };
+
+  // Fetch semua data yang diperlukan
+  const fetchAllData = async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      await Promise.all([
+        fetchStats(),
+        fetchBorrowingData(),
+        fetchRecentBorrowings(),
+        fetchPopularBooks(),
+      ]);
+    } catch (error) {
+      setError("Gagal memuat data dashboard. Silakan coba lagi.");
+    } finally {
+      setLoading(false);
     }
   };
 
   // Fetch statistics for total members, books, and lendings
   const fetchStats = async () => {
     try {
-      const [membersResponse, booksResponse, lendingsResponse] = await Promise.all([
-        fetchWithAuth(`${BASE_URL}/member`),
-        fetchWithAuth(`${BASE_URL}/buku`),
-        fetchWithAuth(`${BASE_URL}/peminjaman`)
-      ]);
+      const lendingsResponse = await fetchWithAuth(`${BASE_URL}/peminjaman`);
+      console.log("Data Peminjaman dari API:", lendingsResponse);
 
-      setStats({
-        totalMembers: membersResponse.data.data?.length || 0,
-        totalBooks: booksResponse.data.data?.length || 0,
-        totalLendings: lendingsResponse.data.data?.length || 0,
-      });
+      const lendingsData = Array.isArray(lendingsResponse) ? lendingsResponse : lendingsResponse.data || [];
+      console.log("Total Peminjaman yang Dihitung:", lendingsData.length);
+
+      setStats((prevStats) => ({
+        ...prevStats,
+        totalLendings: lendingsData.length,
+      }));
     } catch (error) {
       console.error("Error fetching stats:", error);
-      setError("Gagal memuat data statistik. Silakan coba lagi.");
+      throw error;
     }
   };
 
@@ -147,64 +133,69 @@ const Dashboard = forwardRef((props, ref) => {
   const fetchBorrowingData = async () => {
     try {
       const response = await fetchWithAuth(`${BASE_URL}/peminjaman`);
-      const allBorrowings = response.data.data || [];
+      const allBorrowings = Array.isArray(response) ? response : response.data || [];
 
-      // Group by month
       const monthlyData = {};
-      allBorrowings.forEach(borrowing => {
+      allBorrowings.forEach((borrowing) => {
+        if (!borrowing.tanggal_peminjaman) return;
+
         const date = new Date(borrowing.tanggal_peminjaman);
         const monthYear = `${date.getFullYear()}-${date.getMonth()}`;
-        
+
         if (!monthlyData[monthYear]) {
           monthlyData[monthYear] = {
-            month: date.toLocaleString('id-ID', { month: 'short' }),
-            borrowings: 0
+            month: date.toLocaleString("id-ID", { month: "short" }),
+            borrowings: 0,
           };
         }
         monthlyData[monthYear].borrowings++;
       });
 
-      // Convert to array and sort by month
-      const result = Object.values(monthlyData)
-        .sort((a, b) => {
-          const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
-          return months.indexOf(a.month) - months.indexOf(b.month);
-        });
+      const result = Object.values(monthlyData).sort((a, b) => {
+        const months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+        return months.indexOf(a.month) - months.indexOf(b.month);
+      });
 
       setBorrowingsData(result);
     } catch (error) {
       console.error("Error fetching borrowings data:", error);
-      setError("Gagal memuat data grafik peminjaman. Silakan coba lagi.");
+      throw error;
     }
   };
 
   // Fetch recent borrowings
   const fetchRecentBorrowings = async () => {
     try {
-      const response = await fetchWithAuth(`${BASE_URL}/peminjaman`, {
-        params: {
-          sort: 'tanggal_peminjaman:desc',
-          limit: 5
-        }
-      });
-      
-      const borrowings = response.data.data || [];
+      const response = await fetchWithAuth(`${BASE_URL}/peminjaman`);
+      const allBorrowings = Array.isArray(response) ? response : response.data || [];
+
+      // Urutkan berdasarkan tanggal peminjaman terbaru
+      const sortedBorrowings = [...allBorrowings]
+        .filter((b) => b.tanggal_peminjaman) // Pastikan ada tanggal peminjaman
+        .sort((a, b) => new Date(b.tanggal_peminjaman) - new Date(a.tanggal_peminjaman))
+        .slice(0, 5); // Ambil 5 peminjaman terakhir
+
+      // Tambahkan detail member dan buku untuk setiap peminjaman
       const borrowingsWithDetails = await Promise.all(
-        borrowings.map(async (borrowing) => {
+        sortedBorrowings.map(async (borrowing) => {
           try {
             const [memberResponse, bookResponse] = await Promise.all([
               fetchWithAuth(`${BASE_URL}/member/${borrowing.id_member}`),
-              fetchWithAuth(`${BASE_URL}/buku/${borrowing.id_buku}`)
+              fetchWithAuth(`${BASE_URL}/buku/${borrowing.id_buku}`),
             ]);
-            
+
             return {
               ...borrowing,
-              member: memberResponse.data.data || null,
-              book: bookResponse.data.data || null
+              member: memberResponse.data || memberResponse || { nama: "Member tidak ditemukan" },
+              book: bookResponse.data || bookResponse || { judul: "Buku tidak ditemukan" },
             };
           } catch (error) {
-            console.error("Error fetching details:", error);
-            return borrowing;
+            console.error(`Error fetching details for borrowing ID ${borrowing.id}:`, error);
+            return {
+              ...borrowing,
+              member: { nama: "Error loading member" },
+              book: { judul: "Error loading book" },
+            };
           }
         })
       );
@@ -212,7 +203,7 @@ const Dashboard = forwardRef((props, ref) => {
       setRecentBorrowings(borrowingsWithDetails);
     } catch (error) {
       console.error("Error fetching recent borrowings:", error);
-      setError("Gagal memuat data peminjaman terakhir.");
+      throw error;
     }
   };
 
@@ -220,14 +211,16 @@ const Dashboard = forwardRef((props, ref) => {
   const fetchPopularBooks = async () => {
     try {
       const response = await fetchWithAuth(`${BASE_URL}/peminjaman`);
-      const allBorrowings = response.data.data || [];
+      const allBorrowings = Array.isArray(response) ? response : response.data || [];
 
       const bookCounts = {};
-      allBorrowings.forEach(borrowing => {
+      allBorrowings.forEach((borrowing) => {
+        if (!borrowing.id_buku) return;
+
         if (!bookCounts[borrowing.id_buku]) {
           bookCounts[borrowing.id_buku] = {
             id: borrowing.id_buku,
-            count: 0
+            count: 0,
           };
         }
         bookCounts[borrowing.id_buku].count++;
@@ -242,68 +235,49 @@ const Dashboard = forwardRef((props, ref) => {
           try {
             const bookResponse = await fetchWithAuth(`${BASE_URL}/buku/${book.id}`);
             return {
-              ...bookResponse.data.data,
-              borrowCount: book.count
+              ...(bookResponse.data || bookResponse),
+              borrowCount: book.count,
             };
           } catch (error) {
-            console.error("Error fetching book details:", error);
+            console.error(`Error fetching book details for ID ${book.id}:`, error);
             return null;
           }
         })
       );
 
-      setPopularBooks(booksWithDetails.filter(book => book !== null));
+      setPopularBooks(booksWithDetails.filter((book) => book !== null));
     } catch (error) {
       console.error("Error fetching popular books:", error);
-      setError("Gagal memuat data buku populer. Silakan coba lagi.");
+      throw error;
     }
   };
 
-  // Handle page change for recent borrowings
-  const handlePageChange = (type, direction) => {
-    if (type === "recentBorrowings") {
-      setRecentBorrowingsPage((prevPage) => prevPage + direction);
-    } else if (type === "popularBooks") {
-      setPopularBooksPage((prevPage) => prevPage + direction);
+  // Fetch all lendings with pagination
+  const fetchAllLendings = async () => {
+    let allLendings = [];
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore) {
+      const response = await fetchWithAuth(`${BASE_URL}/peminjaman?page=${page}`);
+      const data = response.data || [];
+      allLendings = [...allLendings, ...data];
+
+      hasMore = response.meta && response.meta.current_page < response.meta.last_page;
+      page++;
     }
+
+    return allLendings;
   };
 
+  // Refresh data setiap kali halaman diakses
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      handleLogout();
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    Promise.all([
-      fetchStats(),
-      fetchBorrowingData(),
-      fetchRecentBorrowings(),
-      fetchPopularBooks()
-    ]).finally(() => {
-      setLoading(false);
-    });
-  }, []);
+    fetchAllData();
+  }, [location]); // Dependensi pada lokasi untuk memuat ulang data saat halaman berubah
 
   useImperativeHandle(ref, () => ({
-    refreshStats: () => {
-      console.log("Refreshing stats...");
-    },
+    refreshStats: fetchAllData,
   }));
-
-  // Paginate recent borrowings and popular books
-  const currentRecentBorrowings = recentBorrowings.slice(
-    (recentBorrowingsPage - 1) * itemsPerPage,
-    recentBorrowingsPage * itemsPerPage
-  );
-
-  const currentPopularBooks = popularBooks.slice(
-    (popularBooksPage - 1) * itemsPerPage,
-    popularBooksPage * itemsPerPage
-  );
 
   return (
     <div className="dashboard-container bg-light">
@@ -415,9 +389,9 @@ const Dashboard = forwardRef((props, ref) => {
                     </h5>
                   </div>
                   <div className="card-body">
-                    {currentRecentBorrowings.length > 0 ? (
+                    {recentBorrowings.length > 0 ? (
                       <div className="list-group list-group-flush">
-                        {currentRecentBorrowings.map((borrowing, index) => (
+                        {recentBorrowings.map((borrowing, index) => (
                           <div key={index} className="list-group-item border-0 px-0 py-3">
                             <div className="d-flex align-items-center">
                               <div className="bg-light rounded p-2 me-3">
@@ -431,7 +405,7 @@ const Dashboard = forwardRef((props, ref) => {
                                   Meminjam "{borrowing.book?.judul || 'Buku tidak ditemukan'}"
                                 </p>
                                 <small className="text-muted">
-                                  {borrowing.tanggal_peminjaman}
+                                  {formatDate(borrowing.tanggal_peminjaman)} ({timeAgo(borrowing.tanggal_peminjaman)})
                                 </small>
                               </div>
                             </div>
@@ -457,7 +431,7 @@ const Dashboard = forwardRef((props, ref) => {
                     </h5>
                   </div>
                   <div className="card-body">
-                    {currentPopularBooks.length > 0 ? (
+                    {popularBooks.length > 0 ? (
                       <div className="table-responsive">
                         <table className="table table-borderless mb-0">
                           <thead>
@@ -468,10 +442,10 @@ const Dashboard = forwardRef((props, ref) => {
                             </tr>
                           </thead>
                           <tbody>
-                            {currentPopularBooks.map((book, index) => (
+                            {popularBooks.map((book, index) => (
                               <tr key={index}>
-                                <td>{book.judul}</td>
-                                <td>{book.pengarang}</td>
+                                <td>{book.judul || '-'}</td>
+                                <td>{book.pengarang || '-'}</td>
                                 <td>
                                   <span className="badge bg-warning bg-opacity-10 text-warning">
                                     {book.borrowCount}x

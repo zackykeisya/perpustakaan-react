@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import Pagination from '../../components/Pagination';
 
 const BookList = () => {
   const [books, setBooks] = useState([]);
@@ -19,6 +20,8 @@ const BookList = () => {
   });
   const [bookDetail, setBookDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [booksPerPage] = useState(5);
 
   const token = localStorage.getItem('token');
 
@@ -106,7 +109,7 @@ const BookList = () => {
       judul: book.judul || '',
       pengarang: book.pengarang || '',
       tahun_terbit: book.tahun_terbit || '',
-      penerbit: book.pengarang || '',
+      penerbit: book.penerbit || '',
       stok: book.stok || '',
       detail: book.detail || '',
     });
@@ -207,9 +210,14 @@ const BookList = () => {
     }
   };
 
+  // Pagination logic
+  const indexOfLastBook = currentPage * booksPerPage;
+  const indexOfFirstBook = indexOfLastBook - booksPerPage;
+  const currentBooks = books.slice(indexOfFirstBook, indexOfLastBook);
+  const totalPages = Math.ceil(books.length / booksPerPage);
+
   return (
     <div className="container py-4">
-      {/* Header with Library Theme */}
       <div className="library-header bg-primary bg-opacity-10 p-4 rounded-4 mb-4 border-start border-5 border-primary">
         <div className="d-flex justify-content-between align-items-center">
           <div>
@@ -231,7 +239,6 @@ const BookList = () => {
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="library-card bg-white rounded-4 shadow-sm p-4">
         {loading ? (
           <div className="text-center py-5">
@@ -242,7 +249,7 @@ const BookList = () => {
           </div>
         ) : (
           <>
-            {books.length > 0 ? (
+            {currentBooks.length > 0 ? (
               <div className="table-responsive">
                 <table className="table table-hover align-middle">
                   <thead className="table-light">
@@ -258,14 +265,14 @@ const BookList = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {books.map((book, index) => (
+                    {currentBooks.map((book, index) => (
                       <tr 
                         key={book.id} 
                         className="book-row"
                         style={{ cursor: 'pointer' }}
                         onClick={() => openDetailModal(book)}
                       >
-                        <td className="ps-4">{index + 1}</td>
+                        <td className="ps-4">{index + 1 + indexOfFirstBook}</td>
                         <td>
                           <span className="badge bg-primary bg-opacity-10 text-primary">
                             {book.no_rak}
@@ -328,7 +335,12 @@ const BookList = () => {
         )}
       </div>
 
-      {/* Add/Edit Modal */}
+      <Pagination 
+        currentPage={currentPage} 
+        totalPages={totalPages} 
+        onPageChange={(page) => setCurrentPage(page)} 
+      />
+
       {showModal && (
         <div
           className="modal fade show"
@@ -414,7 +426,6 @@ const BookList = () => {
         </div>
       )}
 
-      {/* Detail Book Modal */}
       {showDetailModal && (
         <div
           className="modal fade show"

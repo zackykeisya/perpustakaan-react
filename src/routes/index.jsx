@@ -8,6 +8,7 @@ import GuestRoute from '../layouts/middleware/GuestRoute';
 // Components
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
+import Pagination from '../components/Pagination'; // Import Pagination component
 
 // Pages
 import Login from '../pages/login';

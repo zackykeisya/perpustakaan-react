@@ -3,6 +3,7 @@ import axios from "axios";
 import { useParams } from "react-router-dom";
 import jsPDF from "jspdf";
 import "jspdf-autotable";
+import Pagination from '../../components/Pagination';
 
 export default function MemberDetail() {
   const [member, setMember] = useState(null);
@@ -10,6 +11,8 @@ export default function MemberDetail() {
   const [denda, setDenda] = useState([]);
   const [buku, setBuku] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5;
   const { id } = useParams();
 
   useEffect(() => {
@@ -24,26 +27,20 @@ export default function MemberDetail() {
         const headers = { Authorization: `Bearer ${token}` };
 
         // Fetch data buku
-        console.log("Fetching buku data from:", `http://45.64.100.26:88/perpus-api/public/api/buku`);
         const bukuRes = await axios.get(`http://45.64.100.26:88/perpus-api/public/api/buku`, { headers });
-        console.log("Data Buku dari API:", bukuRes.data);
-        setBuku(bukuRes.data.data);
+        setBuku(bukuRes.data.data || bukuRes.data || []);
 
         // Fetch data member
         const memberRes = await axios.get(`http://45.64.100.26:88/perpus-api/public/api/member/${id}`, { headers });
         setMember(memberRes.data);
 
         // Fetch data peminjaman
-        console.log("Fetching peminjaman data from:", `http://45.64.100.26:88/perpus-api/public/api/peminjaman/${id}`);
         const peminjamanRes = await axios.get(`http://45.64.100.26:88/perpus-api/public/api/peminjaman/${id}`, { headers });
-        console.log("Data Peminjaman dari API:", peminjamanRes.data);
-        setPeminjaman(peminjamanRes.data.data);
+        setPeminjaman(peminjamanRes.data.data || peminjamanRes.data || []);
 
         // Fetch data denda
-        console.log("Fetching denda data from:", `http://45.64.100.26:88/perpus-api/public/api/denda/${id}`);
         const dendaRes = await axios.get(`http://45.64.100.26:88/perpus-api/public/api/denda/${id}`, { headers });
-        console.log("Data Denda dari API:", dendaRes.data);
-        setDenda(dendaRes.data.data);
+        setDenda(dendaRes.data.data || dendaRes.data || []);
       } catch (error) {
         console.error("Error fetching data:", error);
         if (error.message === "Network Error") {
@@ -65,37 +62,109 @@ export default function MemberDetail() {
       return;
     }
 
-    const doc = new jsPDF();
-
-    // Tambahkan judul
-    doc.setFontSize(16);
-    doc.text(`Riwayat Peminjaman - ${member.nama}`, 14, 20);
-
-    // Tambahkan tabel
-    const tableColumn = ["ID Peminjaman", "ID Buku", "Tanggal Pinjam", "Tanggal Kembali", "Status", "Denda"];
-    const tableRows = [];
-
-    peminjaman.forEach((item) => {
-      const dendaItem = denda.find((d) => d.id_buku === item.id_buku);
-      const rowData = [
-        `#${item.id}`,
-        `B-${item.id_buku}`,
-        new Date(item.tgl_pinjam).toLocaleDateString(),
-        item.tgl_pengembalian ? new Date(item.tgl_pengembalian).toLocaleDateString() : "Belum dikembalikan",
-        item.status_pengembalian === 0 ? "Dipinjam" : "Dikembalikan",
-        dendaItem ? `Rp ${dendaItem.jumlah_denda.toLocaleString()}` : "-",
-      ];
-      tableRows.push(rowData);
+    const doc = new jsPDF({
+      orientation: 'landscape', // Format landscape untuk tabel yang lebar
+      unit: 'mm'
     });
 
+    // Tambahkan header
+    doc.setFontSize(18);
+    doc.setTextColor(40, 40, 40);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`RIWAYAT PEMINJAMAN - ${member.nama.toUpperCase()}`, 14, 20);
+
+    // Informasi member
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`No. KTP: ${member.no_ktp}`, 14, 30);
+    doc.text(`Alamat: ${member.alamat}`, 14, 36);
+    doc.text(`Terdaftar sejak: ${new Date(member.created_at).toLocaleDateString()}`, 14, 42);
+
+    // Tambahkan tabel
+    const tableColumn = [
+      "ID", 
+      "Nama Buku", 
+      "Tanggal Pinjam", 
+      "Tanggal Kembali", 
+      "Status", 
+      "Denda"
+    ];
+    
+    const tableRows = peminjaman.map((item) => {
+      const bukuItem = buku.find((b) => b.id === item.id_buku);
+      const dendaItem = denda.find((d) => d.id_buku === item.id_buku);
+      
+      return [
+        item.id,
+        bukuItem ? bukuItem.judul : "Buku tidak ditemukan",
+        new Date(item.tgl_pinjam).toLocaleDateString('id-ID'),
+        item.tgl_pengembalian 
+          ? new Date(item.tgl_pengembalian).toLocaleDateString('id-ID') 
+          : "Belum dikembalikan",
+        item.status_pengembalian === 0 ? "Dipinjam" : "Dikembalikan",
+        dendaItem ? `Rp ${dendaItem.jumlah_denda.toLocaleString('id-ID')}` : "-"
+      ];
+    });
+
+    // Style untuk tabel
     doc.autoTable({
       head: [tableColumn],
       body: tableRows,
-      startY: 30,
+      startY: 50,
+      styles: {
+        fontSize: 10,
+        cellPadding: 3,
+        overflow: 'linebreak',
+        valign: 'middle'
+      },
+      headStyles: {
+        fillColor: [41, 128, 185],
+        textColor: 255,
+        fontStyle: 'bold'
+      },
+      columnStyles: {
+        0: { cellWidth: 15 }, // ID
+        1: { cellWidth: 50 }, // Nama Buku
+        2: { cellWidth: 30 }, // Tanggal Pinjam
+        3: { cellWidth: 30 }, // Tanggal Kembali
+        4: { cellWidth: 25 }, // Status
+        5: { cellWidth: 30 }  // Denda
+      },
+      didDrawPage: function (data) {
+        // Footer
+        doc.setFontSize(10);
+        doc.setTextColor(150);
+        doc.text(
+          `Dicetak pada: ${new Date().toLocaleString('id-ID')}`, 
+          data.settings.margin.left, 
+          doc.internal.pageSize.height - 10
+        );
+      }
     });
 
     // Simpan file PDF
-    doc.save(`Riwayat_Peminjaman_${member.nama}.pdf`);
+    doc.save(`Riwayat_Peminjaman_${member.nama.replace(/\s+/g, '_')}.pdf`);
+  };
+
+  // Hitung data yang akan ditampilkan berdasarkan halaman saat ini
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentPeminjaman = peminjaman.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(peminjaman.length / itemsPerPage);
+
+  const getUserName = () => {
+    const user = localStorage.getItem('user');
+    if (!user) {
+      return 'Pengguna'; // Fallback jika user tidak ditemukan
+    }
+
+    try {
+      const parsedUser = JSON.parse(user);
+      return parsedUser.name || 'Pengguna'; // Fallback jika name tidak ada
+    } catch (error) {
+      console.error("Error parsing user data:", error);
+      return 'Pengguna'; // Fallback jika parsing gagal
+    }
   };
 
   if (loading) {
@@ -153,11 +222,11 @@ export default function MemberDetail() {
                   <ul className="list-group list-group-flush">
                     <li className="list-group-item d-flex justify-content-between align-items-center">
                       <span className="fw-bold">Tanggal Lahir:</span>
-                      <span className="text-muted">{new Date(member.tgl_lahir).toLocaleDateString()}</span>
+                      <span className="text-muted">{new Date(member.tgl_lahir).toLocaleDateString('id-ID')}</span>
                     </li>
                     <li className="list-group-item d-flex justify-content-between align-items-center">
                       <span className="fw-bold">Terdaftar Sejak:</span>
-                      <span className="text-muted">{new Date(member.created_at).toLocaleDateString()}</span>
+                      <span className="text-muted">{new Date(member.created_at).toLocaleDateString('id-ID')}</span>
                     </li>
                   </ul>
                 </div>
@@ -165,7 +234,7 @@ export default function MemberDetail() {
             </div>
             <div className="card-footer bg-light">
               <small className="text-muted">
-                Terakhir diperbarui: {new Date(member.updated_at).toLocaleString()}
+                Terakhir diperbarui: {new Date(member.updated_at).toLocaleString('id-ID')}
               </small>
             </div>
           </div>
@@ -181,61 +250,80 @@ export default function MemberDetail() {
                 <span className="badge bg-primary rounded-pill me-3">
                   {peminjaman.length} total peminjaman
                 </span>
-                <button className="btn btn-success btn-sm" onClick={exportToPDF}>
+                <button 
+                  className="btn btn-success btn-sm" 
+                  onClick={exportToPDF}
+                  disabled={peminjaman.length === 0}
+                >
+                  <i className="bi bi-file-earmark-pdf me-1"></i>
                   Export PDF
                 </button>
               </div>
             </div>
 
-            {peminjaman.length > 0 ? (
-              <div className="table-responsive">
-                <table className="table table-hover align-middle">
-                  <thead className="table-light">
-                    <tr>
-                      <th scope="col">ID Peminjaman</th>
-                      <th scope="col">ID Buku</th>
-                      <th scope="col">Tanggal Pinjam</th>
-                      <th scope="col">Tanggal Kembali</th>
-                      <th scope="col">Status</th>
-                      <th scope="col">Denda</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {peminjaman.map((item) => {
-                      const dendaItem = denda.find((d) => d.id_buku === item.id_buku);
-                      return (
-                        <tr key={item.id}>
-                          <td className="fw-semibold">#{item.id}</td>
-                          <td>B-{item.id_buku}</td>
-                          <td>{new Date(item.tgl_pinjam).toLocaleDateString()}</td>
-                          <td>
-                            {item.tgl_pengembalian ? (
-                              new Date(item.tgl_pengembalian).toLocaleDateString()
-                            ) : (
-                              <span className="text-warning">Belum dikembalikan</span>
-                            )}
-                          </td>
-                          <td>
-                            <span className={`badge ${item.status_pengembalian === 0 ? "bg-warning" : "bg-success"}`}>
-                              {item.status_pengembalian === 0 ? "Dipinjam" : "Dikembalikan"}
-                            </span>
-                          </td>
-                          <td>
-                            {dendaItem ? (
-                              <div>
-                                <span className="text-danger fw-bold">Rp {dendaItem.jumlah_denda.toLocaleString()}</span>
-                                <div className="text-muted small">{dendaItem.jenis_denda}</div>
-                              </div>
-                            ) : (
-                              <span className="text-success">-</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+            {currentPeminjaman.length > 0 ? (
+              <>
+                <div className="table-responsive">
+                  <table className="table table-hover align-middle">
+                    <thead className="table-light">
+                      <tr>
+                        <th scope="col">ID Peminjaman</th>
+                        <th scope="col">Nama Buku</th>
+                        <th scope="col">Tanggal Pinjam</th>
+                        <th scope="col">Tanggal Kembali</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Denda</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {currentPeminjaman.map((item) => {
+                        const bukuItem = buku.find((b) => b.id === item.id_buku);
+                        const dendaItem = denda.find((d) => d.id_buku === item.id_buku);
+                        return (
+                          <tr key={item.id}>
+                            <td className="fw-semibold">#{item.id}</td>
+                            <td>
+                              {bukuItem ? (
+                                <span className="fw-semibold">{bukuItem.judul}</span>
+                              ) : (
+                                <span className="text-danger">Buku tidak ditemukan (ID: {item.id_buku})</span>
+                              )}
+                            </td>
+                            <td>{new Date(item.tgl_pinjam).toLocaleDateString('id-ID')}</td>
+                            <td>
+                              {item.tgl_pengembalian ? (
+                                new Date(item.tgl_pengembalian).toLocaleDateString('id-ID')
+                              ) : (
+                                <span className="text-warning">Belum dikembalikan</span>
+                              )}
+                            </td>
+                            <td>
+                              <span className={`badge ${item.status_pengembalian === 0 ? "bg-warning" : "bg-success"}`}>
+                                {item.status_pengembalian === 0 ? "Dipinjam" : "Dikembalikan"}
+                              </span>
+                            </td>
+                            <td>
+                              {dendaItem ? (
+                                <div>
+                                  <span className="text-danger fw-bold">Rp {dendaItem.jumlah_denda.toLocaleString('id-ID')}</span>
+                                  <div className="text-muted small">{dendaItem.jenis_denda}</div>
+                                </div>
+                              ) : (
+                                <span className="text-success">-</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <Pagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  onPageChange={(page) => setCurrentPage(page)}
+                />
+              </>
             ) : (
               <div className="text-center py-4">
                 <div className="mb-3">
