@@ -16,7 +16,7 @@ const Dashboard = forwardRef((props, ref) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
-  const location = useLocation(); // Untuk mendeteksi perubahan lokasi
+  const location = useLocation();
 
   // Fungsi untuk mendapatkan headers dengan token
   const getHeaders = () => {
@@ -34,48 +34,11 @@ const Dashboard = forwardRef((props, ref) => {
   // Handle logout ketika token tidak valid
   const handleLogout = () => {
     localStorage.removeItem("token");
-    navigate("/login");
     alert("Sesi Anda telah berakhir. Silakan login kembali.");
+    navigate("/login");
   };
 
-  // Format tanggal Indonesia
-  const formatDate = (dateString) => {
-    if (!dateString) return "-";
-    const options = { 
-      weekday: 'long', 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
-    };
-    return new Date(dateString).toLocaleDateString('id-ID', options);
-  };
-
-  // Format waktu relatif
-  const timeAgo = (dateString) => {
-    if (!dateString) return "-";
-    const date = new Date(dateString);
-    const now = new Date();
-    const seconds = Math.floor((now - date) / 1000);
-    
-    let interval = Math.floor(seconds / 31536000);
-    if (interval >= 1) return `${interval} tahun lalu`;
-    
-    interval = Math.floor(seconds / 2592000);
-    if (interval >= 1) return `${interval} bulan lalu`;
-    
-    interval = Math.floor(seconds / 86400);
-    if (interval >= 1) return `${interval} hari lalu`;
-    
-    interval = Math.floor(seconds / 3600);
-    if (interval >= 1) return `${interval} jam lalu`;
-    
-    interval = Math.floor(seconds / 60);
-    if (interval >= 1) return `${interval} menit lalu`;
-    
-    return "Baru saja";
-  };
-
-  // Fungsi untuk fetch data dengan penanganan error
+  // Fungsi untuk fetch data dengan autentikasi
   const fetchWithAuth = async (url) => {
     try {
       const response = await axios.get(url, {
@@ -113,16 +76,29 @@ const Dashboard = forwardRef((props, ref) => {
   // Fetch statistics for total members, books, and lendings
   const fetchStats = async () => {
     try {
-      const lendingsResponse = await fetchWithAuth(`${BASE_URL}/peminjaman`);
-      console.log("Data Peminjaman dari API:", lendingsResponse);
+      const [membersResponse, booksResponse, lendingsResponse] = await Promise.all([
+        fetchWithAuth(`${BASE_URL}/member`),
+        fetchWithAuth(`${BASE_URL}/buku`),
+        fetchWithAuth(`${BASE_URL}/peminjaman`),
+      ]);
 
+      console.log("Members Response:", membersResponse);
+      console.log("Books Response:", booksResponse);
+      console.log("Lendings Response:", lendingsResponse);
+
+      const membersData = Array.isArray(membersResponse) ? membersResponse : membersResponse.data || [];
+      const booksData = Array.isArray(booksResponse) ? booksResponse : booksResponse.data || [];
       const lendingsData = Array.isArray(lendingsResponse) ? lendingsResponse : lendingsResponse.data || [];
-      console.log("Total Peminjaman yang Dihitung:", lendingsData.length);
 
-      setStats((prevStats) => ({
-        ...prevStats,
+      console.log("Members Data:", membersData);
+      console.log("Books Data:", booksData);
+      console.log("Lendings Data:", lendingsData);
+
+      setStats({
+        totalMembers: membersData.length,
+        totalBooks: booksData.length,
         totalLendings: lendingsData.length,
-      }));
+      });
     } catch (error) {
       console.error("Error fetching stats:", error);
       throw error;
@@ -151,11 +127,7 @@ const Dashboard = forwardRef((props, ref) => {
         monthlyData[monthYear].borrowings++;
       });
 
-      const result = Object.values(monthlyData).sort((a, b) => {
-        const months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
-        return months.indexOf(a.month) - months.indexOf(b.month);
-      });
-
+      const result = Object.values(monthlyData).sort((a, b) => a.month.localeCompare(b.month));
       setBorrowingsData(result);
     } catch (error) {
       console.error("Error fetching borrowings data:", error);
@@ -169,38 +141,12 @@ const Dashboard = forwardRef((props, ref) => {
       const response = await fetchWithAuth(`${BASE_URL}/peminjaman`);
       const allBorrowings = Array.isArray(response) ? response : response.data || [];
 
-      // Urutkan berdasarkan tanggal peminjaman terbaru
       const sortedBorrowings = [...allBorrowings]
-        .filter((b) => b.tanggal_peminjaman) // Pastikan ada tanggal peminjaman
+        .filter((b) => b.tanggal_peminjaman)
         .sort((a, b) => new Date(b.tanggal_peminjaman) - new Date(a.tanggal_peminjaman))
-        .slice(0, 5); // Ambil 5 peminjaman terakhir
+        .slice(0, 5);
 
-      // Tambahkan detail member dan buku untuk setiap peminjaman
-      const borrowingsWithDetails = await Promise.all(
-        sortedBorrowings.map(async (borrowing) => {
-          try {
-            const [memberResponse, bookResponse] = await Promise.all([
-              fetchWithAuth(`${BASE_URL}/member/${borrowing.id_member}`),
-              fetchWithAuth(`${BASE_URL}/buku/${borrowing.id_buku}`),
-            ]);
-
-            return {
-              ...borrowing,
-              member: memberResponse.data || memberResponse || { nama: "Member tidak ditemukan" },
-              book: bookResponse.data || bookResponse || { judul: "Buku tidak ditemukan" },
-            };
-          } catch (error) {
-            console.error(`Error fetching details for borrowing ID ${borrowing.id}:`, error);
-            return {
-              ...borrowing,
-              member: { nama: "Error loading member" },
-              book: { judul: "Error loading book" },
-            };
-          }
-        })
-      );
-
-      setRecentBorrowings(borrowingsWithDetails);
+      setRecentBorrowings(sortedBorrowings);
     } catch (error) {
       console.error("Error fetching recent borrowings:", error);
       throw error;
@@ -252,28 +198,10 @@ const Dashboard = forwardRef((props, ref) => {
     }
   };
 
-  // Fetch all lendings with pagination
-  const fetchAllLendings = async () => {
-    let allLendings = [];
-    let page = 1;
-    let hasMore = true;
-
-    while (hasMore) {
-      const response = await fetchWithAuth(`${BASE_URL}/peminjaman?page=${page}`);
-      const data = response.data || [];
-      allLendings = [...allLendings, ...data];
-
-      hasMore = response.meta && response.meta.current_page < response.meta.last_page;
-      page++;
-    }
-
-    return allLendings;
-  };
-
-  // Refresh data setiap kali halaman diakses
+  // Fetch data saat halaman diakses
   useEffect(() => {
     fetchAllData();
-  }, [location]); // Dependensi pada lokasi untuk memuat ulang data saat halaman berubah
+  }, [location]);
 
   useImperativeHandle(ref, () => ({
     refreshStats: fetchAllData,
@@ -286,32 +214,11 @@ const Dashboard = forwardRef((props, ref) => {
           <h1 className="h2 fw-bold text-dark">
             <i className="bi bi-book me-2"></i>Dashboard Perpustakaan
           </h1>
-          <div className="bg-white p-2 rounded shadow-sm">
-            <span className="text-muted small">
-              {new Date().toLocaleDateString('id-ID', {
-                weekday: 'long',
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-              })}
-            </span>
-          </div>
         </div>
-
-        {error && (
-          <div className="alert alert-danger mb-4">
-            <i className="bi bi-exclamation-triangle-fill me-2"></i>
-            {error}
-          </div>
-        )}
 
         {loading ? (
           <div className="text-center my-5 py-5">
-            <div
-              className="spinner-border text-primary"
-              style={{ width: '3rem', height: '3rem' }}
-              role="status"
-            >
+            <div className="spinner-border text-primary" style={{ width: "3rem", height: "3rem" }} role="status">
               <span className="visually-hidden">Loading...</span>
             </div>
             <p className="mt-3 fs-5">Memuat data perpustakaan...</p>
@@ -332,7 +239,9 @@ const Dashboard = forwardRef((props, ref) => {
                       </div>
                       <div className="col-9">
                         <h6 className="text-uppercase text-muted mb-2">Total Anggota</h6>
-                        <h2 className="mb-0 fw-bold">{stats.totalMembers}</h2>
+                        <h2 className="mb-0 fw-bold">
+                          {stats.totalMembers > 0 ? stats.totalMembers : "Memuat..."}
+                        </h2>
                       </div>
                     </div>
                   </div>
@@ -351,7 +260,9 @@ const Dashboard = forwardRef((props, ref) => {
                       </div>
                       <div className="col-9">
                         <h6 className="text-uppercase text-muted mb-2">Total Buku</h6>
-                        <h2 className="mb-0 fw-bold">{stats.totalBooks}</h2>
+                        <h2 className="mb-0 fw-bold">
+                          {stats.totalBooks > 0 ? stats.totalBooks : "Memuat..."}
+                        </h2>
                       </div>
                     </div>
                   </div>
@@ -370,7 +281,9 @@ const Dashboard = forwardRef((props, ref) => {
                       </div>
                       <div className="col-9">
                         <h6 className="text-uppercase text-muted mb-2">Total Peminjaman</h6>
-                        <h2 className="mb-0 fw-bold">{stats.totalLendings}</h2>
+                        <h2 className="mb-0 fw-bold">
+                          {stats.totalLendings > 0 ? stats.totalLendings : "Memuat..."}
+                        </h2>
                       </div>
                     </div>
                   </div>
@@ -399,10 +312,10 @@ const Dashboard = forwardRef((props, ref) => {
                               </div>
                               <div className="flex-grow-1">
                                 <h6 className="mb-1">
-                                  {borrowing.member?.nama || 'Member tidak ditemukan'}
+                                  {borrowing.member?.nama || 'Member tidak ditemukan'} minjam "{borrowing.book?.judul || 'Buku tidak ditemukan'}"
                                 </h6>
                                 <p className="mb-0 small text-muted">
-                                  Meminjam "{borrowing.book?.judul || 'Buku tidak ditemukan'}"
+                                  Meminjam "{borrowing.book?.judul || 'Buku tidak ditemukan'}" pada {formatDate(borrowing.tanggal_peminjaman)} ({timeAgo(borrowing.tanggal_peminjaman)})
                                 </p>
                                 <small className="text-muted">
                                   {formatDate(borrowing.tanggal_peminjaman)} ({timeAgo(borrowing.tanggal_peminjaman)})
@@ -421,7 +334,6 @@ const Dashboard = forwardRef((props, ref) => {
                   </div>
                 </div>
               </div>
-
               <div className="col-md-6">
                 <div className="card border-0 shadow-sm h-100">
                   <div className="card-header bg-white border-0 py-3">
@@ -446,7 +358,7 @@ const Dashboard = forwardRef((props, ref) => {
                               <tr key={index}>
                                 <td>{book.judul || '-'}</td>
                                 <td>{book.pengarang || '-'}</td>
-                                <td>
+                                <td className="text-warning">
                                   <span className="badge bg-warning bg-opacity-10 text-warning">
                                     {book.borrowCount}x
                                   </span>

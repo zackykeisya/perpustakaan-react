@@ -33,7 +33,7 @@ const Lending = () => {
     fetchLendings();
     fetchMembers();
     fetchBooks();
-    fetchMonthlyStats();
+    fetchMonthlyStats(); // Panggil untuk memuat statistik saat halaman dimuat
   }, []);
 
   const fetchLendings = async () => {
@@ -103,19 +103,12 @@ const Lending = () => {
         'http://45.64.100.26:88/perpus-api/public/api/peminjaman',
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      
       const monthlyStats = processMonthlyStats(data.data || data);
+      console.log('Monthly Stats:', monthlyStats);
       setBorrowingsData(monthlyStats);
     } catch (err) {
       console.error('Gagal mengambil data statistik:', err.message);
-      setBorrowingsData([
-        { month: 'Jan', borrowings: 20 },
-        { month: 'Feb', borrowings: 35 },
-        { month: 'Mar', borrowings: 50 },
-        { month: 'Apr', borrowings: 40 },
-        { month: 'Mei', borrowings: 60 },
-        { month: 'Jun', borrowings: 30 },
-      ]);
+      setBorrowingsData([]); // Reset data jika terjadi error
     }
   };
 
@@ -129,6 +122,7 @@ const Lending = () => {
     ];
     
     lendings.forEach(lending => {
+      if (!lending.tgl_pinjam) return; // Abaikan jika tidak ada tanggal pinjam
       const date = new Date(lending.tgl_pinjam);
       const month = date.getMonth();
       const monthName = monthNames[month];
@@ -163,8 +157,8 @@ const Lending = () => {
       );
       alert('Peminjaman berhasil ditambahkan');
       setFormData({ id_member: '', id_buku: '', tgl_pinjam: '', tgl_pengembalian: '' });
-      fetchLendings();
-      fetchMonthlyStats();
+      fetchLendings(); // Refresh data peminjaman
+      fetchMonthlyStats(); // Refresh statistik
     } catch (err) {
       console.error(err);
       alert('Gagal menambah peminjaman');
@@ -201,8 +195,8 @@ const Lending = () => {
       );
       console.log('Response:', response.data);
       alert('Buku berhasil dikembalikan');
-      fetchLendings();
-      fetchMonthlyStats();
+      fetchLendings(); // Refresh data peminjaman
+      fetchMonthlyStats(); // Refresh statistik
     } catch (err) {
       console.error('Error saat mengembalikan buku:', err.response || err.message);
       alert(`Gagal mengembalikan buku: ${err.response?.data?.message || err.message}`);
